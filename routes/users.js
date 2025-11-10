@@ -1,77 +1,3 @@
-// const express = require("express");
-// const router = express.Router();
-// const auth = require("../middleware/auth");
-// const User = require("../models/User");
-// const Post = require("../models/Post"); // <-- Post model import
-
-// router.get("/me", auth, async (req, res) => {
-//   try {
-//     const DEFAULT_PROFILE_PICTURE = "/uploads/user-photo.jpg";
-
-//     const user = await User.findById(req.user.id).select("-password");
-//     if (!user) {
-//       return res.status(404).json({ message: "User not found" });
-//     }
-
-//     // Inject default profile picture if missing
-//     if (!user.profilePicture) {
-//       user.profilePicture = DEFAULT_PROFILE_PICTURE;
-//     }
-
-//     res.json(user);
-//   } catch (error) {
-//     console.error("Get user error:", error);
-//     res.status(500).json({ message: "Server error" });
-//   }
-// });
-
-// // @route   GET /api/users/:id
-// // @desc    Get user by ID
-// // @access  Private
-// router.get("/:id", auth, async (req, res) => {
-//   try {
-//     const user = await User.findById(req.params.id).select("-password");
-//     if (!user) {
-//       return res.status(404).json({ message: "User not found" });
-//     }
-//     res.json(user);
-//   } catch (error) {
-//     console.error("Get user by ID error:", error);
-//     res.status(500).json({ message: "Server error" });
-//   }
-// });
-
-// // ===== New route to get posts by user ID =====
-// // @route   GET /api/users/:id/posts
-// // @desc    Get posts by user ID with user info populated
-// // @access  Private
-// router.get("/:id/posts", auth, async (req, res) => {
-//   try {
-//     const userId = req.params.id;
-
-//     // Optional: Check if user exists
-//     const user = await User.findById(userId);
-//     if (!user) {
-//       return res.status(404).json({ message: "User not found" });
-//     }
-
-//     // Populate user details in posts
-//     const posts = await Post.find({ user: userId })
-//       .populate("user", "firstName lastName profilePicture") // <--- populate here
-//       .sort({ createdAt: -1 });
-
-//     res.json(posts);
-//   } catch (error) {
-//     console.error("Get user posts error:", error);
-//     res.status(500).json({ message: "Server error" });
-//   }
-// });
-
-// module.exports = router;
-
-
-
-
 const express = require("express");
 const router = express.Router();
 const auth = require("../middleware/auth");
@@ -111,7 +37,11 @@ router.get("/me", auth, async (req, res) => {
   try {
     const DEFAULT_PROFILE_PICTURE = "/uploads/user-photo.jpg";
 
-    const user = await User.findById(req.user.id).select("-password");
+    const user = await User.findById(req.user.id).populate(
+      "friends",
+      "firstName lastName profilePicture"
+    );
+
     if (!user) {
       return res.status(404).json({ message: "User not found" });
     }
@@ -128,9 +58,67 @@ router.get("/me", auth, async (req, res) => {
   }
 });
 
+// @route   GET /api/users/me/saved-posts
+// @desc    Get saved posts for the logged-in user
+// @access  Private
+
+const verifyToken = require("../middleware/auth"); // ✅ use this middleware
+
+// ✅ GET /me/saved-posts — Fetch saved posts for the logged-in user
+router.get("/me/saved-posts", verifyToken, async (req, res) => {
+  try {
+    const user = await User.findById(req.user.id).populate({
+      path: "savedPosts",
+      populate: {
+        path: "user",
+        select: "firstName lastName profilePicture",
+      },
+    });
+
+    if (!user) return res.status(404).json({ message: "User not found" });
+
+    res.json(user.savedPosts); // returns saved posts with user info
+  } catch (err) {
+    console.error("Fetch saved posts error:", err);
+    res.status(500).json({ message: "Server error" });
+  }
+});
+
 // === GET User by ID ===
 // @route   GET /api/users/:id
 // @access  Private
+// === SEARCH USERS ===
+router.get("/search", auth, async (req, res) => {
+  try {
+    const query = req.query.q ? req.query.q.trim() : "";
+
+    let users;
+
+    if (query === "") {
+      users = await User.find({ _id: { $ne: req.user.id } })
+        .select("_id firstName lastName profilePicture email");
+    } else {
+      users = await User.find({
+        $and: [
+          {
+            $or: [
+              { firstName: { $regex: query, $options: "i" } },
+              { lastName: { $regex: query, $options: "i" } },
+            ],
+          },
+          { _id: { $ne: req.user.id } },
+        ],
+      }).select("_id firstName lastName profilePicture email");
+    }
+
+    res.json(users);
+  } catch (err) {
+    console.error("Search error:", err);
+    res.status(500).json({ message: "Server error" });
+  }
+});
+
+
 router.get("/:id", auth, async (req, res) => {
   try {
     const user = await User.findById(req.params.id).select("-password");
@@ -208,5 +196,60 @@ router.patch(
     }
   }
 );
+
+// PUT /api/users/:id/add-friend
+router.put("/:id/add-friend", auth, async (req, res) => {
+  try {
+    const userId = req.user.id; // Logged-in user
+    console.log("Dipal id", userId);
+    const friendId = req.params.id; // ID of the user to add as friend
+
+    if (userId === friendId) {
+      return res
+        .status(400)
+        .json({ message: "You can't add yourself as a friend." });
+    }
+
+    const user = await User.findById(userId);
+    const friend = await User.findById(friendId);
+
+    if (!user || !friend) {
+      return res.status(404).json({ message: "User not found." });
+    }
+
+    if (user.friends.includes(friendId)) {
+      return res.status(400).json({ message: "Already friends." });
+    }
+
+    // Add friend to user's list
+    user.friends.push(friendId);
+    await user.save();
+
+    // Optionally: Also add user to friend's list (bidirectional)
+    friend.friends.push(userId);
+    await friend.save();
+
+    res.json({ message: "Friend added successfully." });
+  } catch (err) {
+    console.error("Add friend error:", err);
+    res.status(500).json({ message: "Server error" });
+  }
+});
+
+//  GET /api/users/:id/friends
+router.get("/:id/friends", async (req, res) => {
+  try {
+    const user = await User.findById(req.params.id).populate(
+      "friends",
+      "firstName lastName _id"
+    );
+    if (!user) return res.status(404).json({ message: "User not found" });
+    res.json({ friends: user.friends });
+  } catch (err) {
+    console.error("Error getting friends:", err);
+    res.status(500).json({ message: "Server error" });
+  }
+});
+
 
 module.exports = router;

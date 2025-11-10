@@ -1,3 +1,4 @@
+
 const express = require("express");
 const mongoose = require("mongoose");
 const cors = require("cors");
@@ -15,7 +16,6 @@ const app = express();
 // Middleware
 app.use(express.json());
 app.use(cors());
-
 
 // Configure multer for file uploads
 const storage = multer.diskStorage({
@@ -61,6 +61,7 @@ mongoose
 app.use("/api/auth", require("./routes/auth"));
 app.use("/api/users", require("./routes/users"));
 app.use("/api/posts", require("./routes/posts"));
+app.use("/api/groups", require("./routes/groupRoutes"));
 
 // Error handling middleware
 app.use((err, req, res, next) => {

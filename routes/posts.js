@@ -80,36 +80,12 @@ router.get("/", auth, async (req, res) => {
   }
 });
 
-
-// router.post("/", [auth, upload.array("media", 5)], async (req, res) => {
-//   try {
-//     const { content } = req.body;
-
-//     // Store multiple media file paths
-//     const mediaPaths = req.files?.map((file) => `/uploads/${file.filename}`) || [];
-
-//     const newPost = new Post({
-//       user: req.user.id,
-//       content,
-//       media: mediaPaths, // media is now an array
-//       mediaType: "image", // optionally: can infer from mimetype
-//     });
-
-//     const post = await newPost.save();
-//     await post.populate("user", "firstName lastName profilePicture");
-
-//     post.user = applyDefaultProfile(post.user);
-//     res.status(201).json(post);
-//   } catch (error) {
-//     console.error("Create post error:", error);
-//     res.status(500).json({ message: "Server error" });
-//   }
-// });
 router.post("/", [auth, upload.array("media", 5)], async (req, res) => {
   try {
     const { content } = req.body;
 
-    const mediaPaths = req.files?.map((file) => `/uploads/${file.filename}`) || [];
+    const mediaPaths =
+      req.files?.map((file) => `/uploads/${file.filename}`) || [];
 
     // Detect mediaType from first file
     let mediaType = "";
@@ -136,7 +112,6 @@ router.post("/", [auth, upload.array("media", 5)], async (req, res) => {
     res.status(500).json({ message: "Server error" });
   }
 });
-
 
 // @route GET /api/posts/:id
 router.get("/:id", auth, async (req, res) => {
@@ -239,40 +214,6 @@ router.post("/:id/comment", auth, async (req, res) => {
   }
 });
 
-
-
-// @route PUT /api/posts/:id
-// router.put("/:id", auth, async (req, res) => {
-//   try {
-//     const { content } = req.body;
-//     const post = await Post.findById(req.params.id);
-
-//     if (!post) return res.status(404).json({ message: "Post not found" });
-//     if (post.user.toString() !== req.user.id)
-//       return res.status(403).json({ message: "Unauthorized" });
-
-//     post.content = content;
-//     await post.save();
-
-//     await post.populate("user", "firstName lastName profilePicture");
-//     await post.populate("comments.user", "firstName lastName profilePicture");
-
-//     post.user = applyDefaultProfile(post.user);
-//     post.comments = post.comments.map((c) => {
-//       c.user = applyDefaultProfile(c.user);
-//       return c;
-//     });
-
-//     res.json(post);
-//   } catch (error) {
-//     console.error("Edit post error:", error);
-//     res.status(500).json({ message: "Server error" });
-//   }
-// });
-
-
-// --------------------------------->
-
 // @route PUT /api/posts/:id
 router.put("/:id", [auth, upload.array("media", 5)], async (req, res) => {
   try {
@@ -324,13 +265,8 @@ router.put("/:id", [auth, upload.array("media", 5)], async (req, res) => {
   }
 });
 
-
-
-
 // DELETE /api/posts/:id
 // DELETE /api/posts/:postId/media
-
-
 
 router.delete("/:postId/media", auth, async (req, res) => {
   try {
@@ -361,12 +297,64 @@ router.delete("/:postId/media", auth, async (req, res) => {
     }
 
     await post.save();
-    res.status(200).json({ message: "Image removed", updatedMedia: post.media });
+    res
+      .status(200)
+      .json({ message: "Image removed", updatedMedia: post.media });
   } catch (err) {
     console.error("Error deleting image from post:", err);
     res.status(500).json({ message: "Internal server error" });
   }
 });
+
+// POST /api/posts/:id/save - Save post only if not already saved
+router.post("/:id/save", auth, async (req, res) => {
+  try {
+    const userId = req.user.id;
+    const postId = req.params.id;
+
+    const user = await User.findById(userId);
+    if (!user) return res.status(404).json({ message: "User not found" });
+
+    const post = await Post.findById(postId);
+    if (!post) return res.status(404).json({ message: "Post not found" });
+
+    if (!user.savedPosts.includes(postId)) {
+      user.savedPosts.push(postId);
+      await user.save();
+      return res.json({ message: "Post saved", saved: true });
+    } else {
+      return res.status(400).json({ message: "Post already saved" });
+    }
+  } catch (err) {
+    console.error("Save post error:", err);
+    res.status(500).json({ message: "Server error" });
+  }
+});
+
+// @route   POST /api/posts/:postId/save
+// @desc    Save a post to the logged-in user's savedPosts
+// @access  Private
+
+// router.delete("/:id", auth, async (req, res) => {
+//   try {
+//     const post = await Post.findById(req.params.id);
+
+//     if (!post) {
+//       return res.status(404).json({ message: "Post not found" });
+//     }
+
+//     // Check if current user is the owner of the post
+//     if (post.user.toString() !== req.user.id) {
+//       return res.status(403).json({ message: "Unauthorized" });
+//     }
+
+//     await post.deleteOne(); // ✅ deletes the post from DB
+//     res.json({ message: "Post deleted successfully" });
+//   } catch (error) {
+//     console.error("Delete post error:", error);
+//     res.status(500).json({ message: "Server error" });
+//   }
+// });
 
 router.delete("/:id", auth, async (req, res) => {
   try {
@@ -376,23 +364,18 @@ router.delete("/:id", auth, async (req, res) => {
       return res.status(404).json({ message: "Post not found" });
     }
 
-    // Check if current user is the owner of the post
     if (post.user.toString() !== req.user.id) {
       return res.status(403).json({ message: "Unauthorized" });
     }
 
-    await post.deleteOne(); // ✅ deletes the post from DB
-    res.json({ message: "Post deleted successfully" });
+    post.active_flag = false; // Soft delete
+    await post.save();
+
+    res.json({ message: "Post soft deleted successfully" });
   } catch (error) {
-    console.error("Delete post error:", error);
-    res.status(500).json({ message: "Server error" });
+    console.error("Soft delete error:", error);
+    res.status(500).json({ message: "Server error", error: error.message });
   }
 });
-
-
-
-
-
-
 
 module.exports = router;
